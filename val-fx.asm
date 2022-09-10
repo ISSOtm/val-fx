@@ -4,7 +4,7 @@
 
 /*
 
-TODO: 
+TODO:
     - SGB Support (Wrapper code done, just gotta add the sgb transfer itself)
 
 HEADER FORMAT
@@ -122,22 +122,19 @@ valfx_note_table:
     dw 2015
 
 valfx_init:
-    ld de, (valfx_ram_end - valfx_ram)
-    .loop:
-        ld hl, valfx_ram
-        add hl, de
-        ld [hl], 0
-        dec de
-        ld a, d
-        or e
-        jp nz, .loop
+    ld hl, valfx_ram
+    ld c, (valfx_ram_end - valfx_ram)
+    xor a
+.clear
+    ld [hli], a
+    dec c
+    jr nz, .clear
     ret
 
 
 ; Parameters:
 ; HL: Address for SFX start
 valfx_play:
-
     ; Compare priority
     ld a, [hl]
     and $f
@@ -156,18 +153,17 @@ valfx_play:
     ld c, a
     ld a, [valfx_sgb]
     and c
-    cp 0
     jr z, .notsgb
-        ; Do SGB Stuff IDK
-        ret
-    .notsgb:
+    ; Do SGB Stuff IDK
+    ret
+.notsgb
 
     ; C still has the header, thus we check that
     bit 6, c
     jr z, .notsgbdata
-        ld de, $5
-        add hl, de
-    .notsgbdata:
+    ld de, $5
+    add hl, de
+.notsgbdata
 
     ; Load data from header
     ; Increase pointer by one and store to valfx_point
@@ -183,42 +179,41 @@ valfx_play:
     push af ; Store it for later
     bit 5, a
     jr z, .skipch2
-        ; Mute ch2
-        xor a
-        ldh [$FF17], a
-        set 7, a
-        ldh [$FF19], a     
-    .skipch2:
+    ; Mute ch2
+    xor a
+    ldh [$FF17], a
+    set 7, a
+    ldh [$FF19], a
+.skipch2
     pop af
     bit 4, a
     jr z, .skipch4
-        ; Mute ch4
-        xor a
-        ldh [$FF21], a
-        set 7, a
-        ldh [$FF23], a
-    .skipch4:
+    ; Mute ch4
+    xor a
+    ldh [$FF21], a
+    set 7, a
+    ldh [$FF23], a
+.skipch4
     ld hl, valfx_is_play
     ld a, $FF
     ld [hl+], a
     xor a
     ld [hl+], a
     ld [hl], a
-
     ret
 
 valfx_update:
     ld a, [valfx_is_play]
-    cp 0
+    and a
     ret z
 
     ld a, [valfx_curlen]
-    cp 0
+    and a
     jr z, .iszero
-        dec a
-        ld [valfx_curlen], a
-        ret
-    .iszero:
+    dec a
+    ld [valfx_curlen], a
+    ret
+.iszero
 
     ld a, [valfx_laslen]
     ld [valfx_curlen], a
@@ -228,116 +223,125 @@ valfx_update:
 
     ld c, %10000000 ; Start of the flag check, start from left to right
     ld hl, .jump
-    .loop:
-        ld a, [valfx_step_header]
-        and c
-        cp 0
-        jr z, .notflag
-            push hl
-            ld a, [hl+]
-            ld h, [hl]
-            ld l, a
-            jp hl
-            .return:
-                pop hl
-        .notflag:
-        inc hl
-        inc hl
-        xor a
-        srl c
-        cp c
-        jr nz, .loop
+.loop
+    ld a, [valfx_step_header]
+    and c
+    cp 0
+    jr z, .notflag
+    push hl
+    ld a, [hl+]
+    ld h, [hl]
+    ld l, a
+    jp hl
+.return
+    pop hl
+.notflag
+    inc hl
+    inc hl
+    xor a
+    srl c
+    cp c
+    jr nz, .loop
     ret
 
-    ; Returns next value in A
-    ; Modifies: H, L, A, F
-    .get_next_value:
-        ld a, [valfx_point]
-        ld h, a
-        ld a, [valfx_point+1]
-        ld l, a
-        ld a, [hl+]
-        push af
-        ld a, h
-        ld [valfx_point], a
-        ld a, l
-        ld [valfx_point+1], a
-        pop af
-        ret
-    .jump:
-        dw .set_speed
-        dw .set_pan
-        dw .set_duty
-        dw .set_note
-        dw .set_freq
-        dw .set_ch2_vol
-        dw .set_ch4_vol
-        dw .kill
-    .set_speed:
-        call .get_next_value
-        ld [valfx_laslen], a
-        ld [valfx_curlen], a
-        jp .return
-    .set_pan:
-        call .get_next_value
-        ldh [$FF24], a
-        jp .return
-    .set_duty:
-        call .get_next_value
-        ldh [$FF16], a
-        jp .return
-    .set_note:
-        call .get_next_value
-        ld hl, valfx_note_table
-        xor d
-        ld e, a
-        add hl, de
-        ld a, [hl+]
-        ld [$FF18], a
-        ld a, [hl]
-        ld [valfx_shadow_nr24], a
-        ld [$FF19], a
-        jp .return
-    .set_freq:
-        call .get_next_value
-        ldh [$FF22], a
-        jp .return
-    .set_ch2_vol:
-        call .get_next_value
-        ld [$FF17], a
-        ld a, [valfx_shadow_nr24]
-        set 7, a ; Trigger bit
-        ld [$FF19], a
-        jp .return
-    .set_ch4_vol:
-        call .get_next_value
-        ld [$FF21], a
-        ld a, $80 ; Trigger bit
-        ld [$FF23], a
-        jp .return
-    .kill:
-        xor a
-        ld [valfx_is_play], a
-        ld a, $FF
-        ld [$FF25], a
-        ; Unmute music channels
-        ld a, [valfx_step_header]
-        push af
-        bit 5, a
-        jr nz, .skipch2
-            ; Mute ch2
-            xor a
-            ldh [$FF17], a
-            set 7, a
-            ldh [$FF19], a     
-        .skipch2:
-        pop af
-        bit 4, a
-        jr nz, .skipch4
-            ; Mute ch4
-            xor a
-            ldh [$FF21], a
-            set 7, a
-            ldh [$FF23], a
-        .skipch4:
-        jp .return
+; Returns next value in A
+; Modifies: H, L, A, F
+.get_next_value
+    ld a, [valfx_point]
+    ld h, a
+    ld a, [valfx_point+1]
+    ld l, a
+    ld a, [hl+]
+    push af
+    ld a, h
+    ld [valfx_point], a
+    ld a, l
+    ld [valfx_point+1], a
+    pop af
+    ret
+
+.jump
+    dw .set_speed
+    dw .set_pan
+    dw .set_duty
+    dw .set_note
+    dw .set_freq
+    dw .set_ch2_vol
+    dw .set_ch4_vol
+    dw .kill
+
+.set_speed
+    call .get_next_value
+    ld [valfx_laslen], a
+    ld [valfx_curlen], a
+    jp .return
+
+.set_pan
+    call .get_next_value
+    ldh [$FF24], a
+    jp .return
+
+.set_duty
+    call .get_next_value
+    ldh [$FF16], a
+    jp .return
+
+.set_note
+    call .get_next_value
+    ld hl, valfx_note_table
+    xor d
+    ld e, a
+    add hl, de
+    ld a, [hl+]
+    ld [$FF18], a
+    ld a, [hl]
+    ld [valfx_shadow_nr24], a
+    ld [$FF19], a
+    jp .return
+
+.set_freq
+    call .get_next_value
+    ldh [$FF22], a
+    jp .return
+
+.set_ch2_vol
+    call .get_next_value
+    ld [$FF17], a
+    ld a, [valfx_shadow_nr24]
+    set 7, a ; Trigger bit
+    ld [$FF19], a
+    jp .return
+
+.set_ch4_vol
+    call .get_next_value
+    ld [$FF21], a
+    ld a, $80 ; Trigger bit
+    ld [$FF23], a
+    jp .return
+
+.kill
+    xor a
+    ld [valfx_is_play], a
+    ld a, $FF
+    ld [$FF25], a
+    ; Unmute music channels
+    ld a, [valfx_step_header]
+    push af
+    bit 5, a
+    jr nz, .skipch2
+    ; Mute ch2
+    xor a
+    ldh [$FF17], a
+    set 7, a
+    ldh [$FF19], a
+.skipch2
+    pop af
+    bit 4, a
+    jr nz, .skipch4
+    ; Mute ch4
+    xor a
+    ldh [$FF21], a
+    set 7, a
+    ldh [$FF23], a
+.skipch4
+    jp .return
