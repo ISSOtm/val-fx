@@ -194,14 +194,14 @@ valfx_play:
     ld a, AUDHIGH_LENGTH_ON
     ldh [rNR44], a
 .skipch4
-    ld hl, valfx_is_play
-    ld a, $FF
-    ld [hl+], a
-    assert valfx_is_play + 1 == valfx_curlen
+
+    ld hl, valfx_laslen
     xor a
-    ld [hl+], a
-    assert valfx_curlen + 1 == valfx_laslen
-    ld [hl], a
+    ld [hld], a
+    assert valfx_laslen - 1 == valfx_curlen
+    ld [hld], a
+    assert valfx_curlen - 1 == valfx_is_play
+    ld [hl], 1
     ret
 
 valfx_update:
