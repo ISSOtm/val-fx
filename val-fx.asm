@@ -9,28 +9,24 @@ INCLUDE "hardware.inc"
 TODO:
     - SGB Support (Wrapper code done, just gotta add the sgb transfer itself)
 
-HEADER FORMAT
-00000000
-||||++++- Priority
-|||+----- CH4 used flag
-||+------ CH2 used flag
-|+------- SGB data packet flag
-
-if SGB data packet, 5 bytes for the SGB transfer are stored here
-
-STEP HEADER FORMAT:
-00000000
-||||||||
-|||||||+- Kill step flag (End sfx after step)
-||||||+-- Set CH4 Vol flag (vol << 4)
-|||||+--- Set CH2 Vol flag (vol << 4)
-||||+---- Set CH4 Freq flag (bare freq)
-|||+----- Set CH2 Note flag (note * 2)
-||+------ Set CH2 Duty flag (duty << 6)
-|+------- Set panning flag (NR51)
-+-------- Set speed flag (Speed - 1)
-
 */
+
+; Header fields
+rsreset
+DEF VALFX_HDR_PRIO_F equ %0000_1111
+DEF VALFX_HDR_CH4_B equ 4 ; Does this SFX use CH4?
+DEF VALFX_HDR_CH2_B equ 5 ; Does this SFX use CH2?
+DEF VALFX_HDR_SGB_B equ 6 ; Does this SFX include SGB packet data?
+
+; Step header fields
+DEF VALFX_STEP_LAST_B    equ 0
+DEF VALFX_STEP_CH4VOL_B  equ 1
+DEF VALFX_STEP_CH2VOL_B  equ 2
+DEF VALFX_STEP_CH4FREQ_B equ 3
+DEF VALFX_STEP_CH2NOTE_B equ 4
+DEF VALFX_STEP_CH2DUTY_B equ 5
+DEF VALFX_STEP_PAN_B     equ 6
+DEF VALFX_STEP_SPEED_B   equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
@@ -137,16 +133,18 @@ valfx_init:
 ; Parameters:
 ; HL: Address for SFX start
 valfx_play:
-    ; Compare priority
+    ; Compare priorities:
+    ; for the SFX to start playing, its priority must be no greater than the current one's.
     ld a, [hl]
-    and $f
+    and VALFX_HDR_PRIO_F
     ld c, a
     ld a, [valfx_step_header]
-    and $f
+    and VALFX_HDR_PRIO_F
     cp c
-    ret c
+    ret c ; Bail if cur - new < 0, i.e. cur < new
+    ; Here, new <= cur
 
-    ; Stop SFX
+    ; Prevent SFX playback while we are modifying memory (race condition).
     xor a
     ld [valfx_is_play], a
 
@@ -179,7 +177,7 @@ valfx_play:
     ; C still has the header, so we load it again
     ld a, c
     push af ; Store it for later
-    bit 5, a
+    bit VALFX_HDR_CH2_B, a
     jr z, .skipch2
     ; Mute ch2
     xor a
@@ -188,19 +186,21 @@ valfx_play:
     ldh [rNR24], a
 .skipch2
     pop af
-    bit 4, a
+    bit VALFX_HDR_CH4_B, a
     jr z, .skipch4
     ; Mute ch4
     xor a
     ldh [rNR42], a
-    set 7, a
+    ld a, AUDHIGH_LENGTH_ON
     ldh [rNR44], a
 .skipch4
     ld hl, valfx_is_play
     ld a, $FF
     ld [hl+], a
+    assert valfx_is_play + 1 == valfx_curlen
     xor a
     ld [hl+], a
+    assert valfx_curlen + 1 == valfx_laslen
     ld [hl], a
     ret
 
@@ -223,7 +223,7 @@ valfx_update:
     call .get_next_value
     ld [valfx_step_header], a
 
-    ld c, %10000000 ; Start of the flag check, start from left to right
+    ld c, %10000000 ; Which of the flags we are processing
     ld hl, .jump
 .loop
     ld a, [valfx_step_header]
@@ -259,14 +259,20 @@ valfx_update:
     ret
 
 .jump
-    dw .set_speed
-    dw .set_pan
-    dw .set_duty
-    dw .set_note
-    dw .set_freq
-    dw .set_ch2_vol
-    dw .set_ch4_vol
-    dw .kill
+    rsset 8
+MACRO valfx_fx
+    rsset _RS - 1
+    dw \2
+    assert \1 == _RS
+ENDM
+    valfx_fx VALFX_STEP_SPEED_B,   .set_speed
+    valfx_fx VALFX_STEP_PAN_B,     .set_pan
+    valfx_fx VALFX_STEP_CH2DUTY_B, .set_duty
+    valfx_fx VALFX_STEP_CH2NOTE_B, .set_note
+    valfx_fx VALFX_STEP_CH4FREQ_B, .set_freq
+    valfx_fx VALFX_STEP_CH2VOL_B,  .set_ch2_vol
+    valfx_fx VALFX_STEP_CH4VOL_B,  .set_ch4_vol
+    valfx_fx VALFX_STEP_LAST_B,    .kill
 
 .set_speed
     call .get_next_value
