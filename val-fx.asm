@@ -1,5 +1,5 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;  VAL-FX BT VALEN  ;;;
+;;;  VAL-FX BY VALEN  ;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;
 
 INCLUDE "hardware.inc"
@@ -19,14 +19,14 @@ DEF VALFX_HDR_CH2_B equ 5 ; Does this SFX use CH2?
 DEF VALFX_HDR_SGB_B equ 6 ; Does this SFX include SGB packet data?
 
 ; Step header fields
-DEF VALFX_STEP_LAST_B    equ 0
+DEF VALFX_STEP_PAN_B     equ 0
 DEF VALFX_STEP_CH4VOL_B  equ 1
 DEF VALFX_STEP_CH2VOL_B  equ 2
 DEF VALFX_STEP_CH4FREQ_B equ 3
 DEF VALFX_STEP_CH2NOTE_B equ 4
 DEF VALFX_STEP_CH2DUTY_B equ 5
-DEF VALFX_STEP_PAN_B     equ 6
-DEF VALFX_STEP_SPEED_B   equ 7
+DEF VALFX_STEP_SPEED_B   equ 6
+DEF VALFX_STEP_LAST_B    equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
@@ -262,14 +262,14 @@ MACRO valfx_fx
     dw \2
     assert \1 == _RS
 ENDM
+    valfx_fx VALFX_STEP_LAST_B,    .kill
     valfx_fx VALFX_STEP_SPEED_B,   .set_speed
-    valfx_fx VALFX_STEP_PAN_B,     .set_pan
     valfx_fx VALFX_STEP_CH2DUTY_B, .set_duty
     valfx_fx VALFX_STEP_CH2NOTE_B, .set_note
     valfx_fx VALFX_STEP_CH4FREQ_B, .set_freq
     valfx_fx VALFX_STEP_CH2VOL_B,  .set_ch2_vol
     valfx_fx VALFX_STEP_CH4VOL_B,  .set_ch4_vol
-    valfx_fx VALFX_STEP_LAST_B,    .kill
+    valfx_fx VALFX_STEP_PAN_B,     .set_pan
 
 .set_speed
     call .get_next_value
@@ -279,7 +279,7 @@ ENDM
 
 .set_pan
     call .get_next_value
-    ldh [rNR50], a
+    ldh [rNR51], a
     jp .return
 
 .set_duty
@@ -290,7 +290,7 @@ ENDM
 .set_note
     call .get_next_value
     ld hl, valfx_note_table
-    xor d
+    ld d, 0
     ld e, a
     add hl, de
     ld a, [hl+]
