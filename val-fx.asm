@@ -174,10 +174,7 @@ valfx_play:
 
     ; Reset mute channels
 
-    ; C still has the header, so we load it again
-    ld a, c
-    push af ; Store it for later
-    bit VALFX_HDR_CH2_B, a
+    bit VALFX_HDR_CH2_B, c
     jr z, .skipch2
     ; Mute ch2
     xor a
@@ -185,8 +182,8 @@ valfx_play:
     set 7, a
     ldh [rNR24], a
 .skipch2
-    pop af
-    bit VALFX_HDR_CH4_B, a
+
+    bit VALFX_HDR_CH4_B, c
     jr z, .skipch4
     ; Mute ch4
     xor a
