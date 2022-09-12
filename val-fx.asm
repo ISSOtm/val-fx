@@ -19,14 +19,17 @@ DEF VALFX_HDR_CH2_B equ 5 ; Does this SFX use CH2?
 DEF VALFX_HDR_SGB_B equ 6 ; Does this SFX include SGB packet data?
 
 ; Step header fields
-DEF VALFX_STEP_PAN_B     equ 0
-DEF VALFX_STEP_CH4VOL_B  equ 1
-DEF VALFX_STEP_CH2VOL_B  equ 2
-DEF VALFX_STEP_CH4FREQ_B equ 3
-DEF VALFX_STEP_CH2NOTE_B equ 4
-DEF VALFX_STEP_CH2DUTY_B equ 5
-DEF VALFX_STEP_SPEED_B   equ 6
-DEF VALFX_STEP_LAST_B    equ 7
+; Try to rank these bits from most common to least common, as the FX processing loop goes from MSB
+; to LSB, stopping as soon as no more bits are set.
+; (For example, LAST should be the first one in the list, ironically.)
+DEF VALFX_STEP_LAST_B    equ 0
+DEF VALFX_STEP_PAN_B     equ 1
+DEF VALFX_STEP_SPEED_B   equ 2
+DEF VALFX_STEP_CH2NOTE_B equ 3
+DEF VALFX_STEP_CH2DUTY_B equ 4
+DEF VALFX_STEP_CH4FREQ_B equ 5
+DEF VALFX_STEP_CH2VOL_B  equ 6
+DEF VALFX_STEP_CH4VOL_B  equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
@@ -34,7 +37,6 @@ valfx_ram:
 .delay       db ; How many calls remain until the next SFX "step".
 .speed       db ; How many no-op calls to insert between SFX "steps".
 .pointer     dw ; Where the next SFX byte should be read from.
-.step_header db ; The current "step"'s header byte.
 .shadow_nr24 db ; Keeps the lower 3 bits of NR24, to avoid resetting them when restarting the channel.
 .sgb         db ; Set to $FF (although VALFX_HDR_SGB_B is sufficient) to enable SGB support, 0 otherwise.
 .end
@@ -217,26 +219,113 @@ valfx_update:
     ld [valfx_ram.delay], a
 
     call .get_next_value
-    ld [valfx_ram.step_header], a
-
-    ld c, %10000000 ; Which of the flags we are processing
-    ld hl, .jump
-.loop
-    ld a, [valfx_ram.step_header]
-    and c
-    ld a, [hl+]
-    jr z, .notflag
-    push hl
-    ld h, [hl]
-    ld l, a
-    jp hl
-.return
-    pop hl
-.notflag
-    inc hl
-    srl c
-    jr nc, .loop
+    ld c, a
+    ld de, .jumpTable - 2
+.fxLoop
+    ; Skip to next pointer.
+    inc de
+    inc de
+    sla c
+    jr c, .runFX ; We may loop one extra time after the last
+    jr nz, .fxLoop ; Keep looping if there are remaining bits.
     ret
+
+.runFX
+    push de
+    ret ; jp de
+
+.jumpTable
+    rsset 8
+MACRO valfx_fx
+    rsset _RS - 1
+    assert \1 == _RS, STRFMT("\1 (%d) != {d:_RS}", \1)
+    IF _RS != 0
+        jr \2
+    ELSE
+        assert @ == \2 ; The last function is inline
+    ENDC
+ENDM
+    valfx_fx VALFX_STEP_CH4VOL_B,  .set_ch4_vol
+    valfx_fx VALFX_STEP_CH2VOL_B,  .set_ch2_vol
+    valfx_fx VALFX_STEP_CH4FREQ_B, .set_ch4_freq
+    valfx_fx VALFX_STEP_CH2DUTY_B, .set_ch2_duty
+    valfx_fx VALFX_STEP_CH2NOTE_B, .set_ch2_note
+    valfx_fx VALFX_STEP_SPEED_B,   .set_speed
+    valfx_fx VALFX_STEP_PAN_B,     .set_pan
+    valfx_fx VALFX_STEP_LAST_B,    .stop
+
+.stop
+    ld a, $FF ; TODO: maybe we're a bit overreaching here
+    ldh [rNR51], a
+
+    ld a, [valfx_ram.header]
+    ld b, a
+    ; Disable playback.
+    xor a
+    ld [valfx_ram.header], a
+    ; Unmute the music channels that we use.
+    bit 5, b
+    jr nz, .skipch2
+    ; Mute ch2
+    ; a = 0
+    ldh [rNR22], a
+.skipch2
+
+    bit 4, b
+    jr nz, .fxLoop
+    ; Mute ch4
+    xor a
+    ldh [rNR42], a
+    jr .fxLoop
+
+.set_speed
+    call .get_next_value
+    ld [valfx_ram.speed], a
+    ld [valfx_ram.delay], a
+    jr .fxLoop
+
+.set_pan
+    call .get_next_value
+    ldh [rNR51], a
+    jr .fxLoop
+
+.set_ch2_duty
+    call .get_next_value
+    ldh [rNR21], a
+    jr .fxLoop
+
+.set_ch2_note
+    call .get_next_value
+    ld hl, valfx_note_table
+    ld d, 0
+    ld e, a
+    add hl, de
+    ld a, [hl+]
+    ldh [rNR23], a
+    ld a, [hl]
+    ld [valfx_ram.shadow_nr24], a
+    ldh [rNR24], a
+    jr .fxLoop
+
+.set_ch4_freq
+    call .get_next_value
+    ldh [rNR43], a
+    jr .fxLoop
+
+.set_ch2_vol
+    call .get_next_value
+    ldh [rNR22], a
+    ld a, [valfx_ram.shadow_nr24]
+    set 7, a ; Trigger bit
+    ldh [rNR24], a
+    jr .fxLoop
+
+.set_ch4_vol
+    call .get_next_value
+    ldh [rNR42], a
+    ld a, $80 ; Trigger bit
+    ldh [rNR44], a
+    jp .fxLoop
 
 ; Returns next value in A
 ; Modifies: H, L, A, F
@@ -253,95 +342,3 @@ valfx_update:
     ld [valfx_ram.pointer+1], a
     pop af
     ret
-
-.jump
-    rsset 8
-MACRO valfx_fx
-    rsset _RS - 1
-    dw \2
-    assert \1 == _RS
-ENDM
-    valfx_fx VALFX_STEP_LAST_B,    .kill
-    valfx_fx VALFX_STEP_SPEED_B,   .set_speed
-    valfx_fx VALFX_STEP_CH2DUTY_B, .set_duty
-    valfx_fx VALFX_STEP_CH2NOTE_B, .set_note
-    valfx_fx VALFX_STEP_CH4FREQ_B, .set_freq
-    valfx_fx VALFX_STEP_CH2VOL_B,  .set_ch2_vol
-    valfx_fx VALFX_STEP_CH4VOL_B,  .set_ch4_vol
-    valfx_fx VALFX_STEP_PAN_B,     .set_pan
-
-.set_speed
-    call .get_next_value
-    ld [valfx_ram.speed], a
-    ld [valfx_ram.delay], a
-    jp .return
-
-.set_pan
-    call .get_next_value
-    ldh [rNR51], a
-    jp .return
-
-.set_duty
-    call .get_next_value
-    ldh [rNR21], a
-    jp .return
-
-.set_note
-    call .get_next_value
-    ld hl, valfx_note_table
-    ld d, 0
-    ld e, a
-    add hl, de
-    ld a, [hl+]
-    ldh [rNR23], a
-    ld a, [hl]
-    ld [valfx_ram.shadow_nr24], a
-    ldh [rNR24], a
-    jp .return
-
-.set_freq
-    call .get_next_value
-    ldh [rNR43], a
-    jp .return
-
-.set_ch2_vol
-    call .get_next_value
-    ldh [rNR22], a
-    ld a, [valfx_ram.shadow_nr24]
-    set 7, a ; Trigger bit
-    ldh [rNR24], a
-    jp .return
-
-.set_ch4_vol
-    call .get_next_value
-    ldh [rNR42], a
-    ld a, $80 ; Trigger bit
-    ldh [rNR44], a
-    jp .return
-
-.kill
-    xor a
-    ld [valfx_ram.is_playing], a
-    ld a, $FF
-    ldh [rNR51], a
-    ; Unmute music channels
-    ld a, [valfx_ram.step_header]
-    push af
-    bit 5, a
-    jr nz, .skipch2
-    ; Mute ch2
-    xor a
-    ldh [rNR22], a
-    set 7, a
-    ldh [rNR24], a
-.skipch2
-    pop af
-    bit 4, a
-    jr nz, .skipch4
-    ; Mute ch4
-    xor a
-    ldh [rNR42], a
-    set 7, a
-    ldh [rNR44], a
-.skipch4
-    jp .return
