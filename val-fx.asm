@@ -30,14 +30,13 @@ DEF VALFX_STEP_LAST_B    equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
-.is_play     db
-.curlen      db
-.laslen      db
-.point       dw
-.header      db
-.step_header db
-.shadow_nr24 db
-.sgb         db
+.is_playing  db ; 0 disables SFX playback.
+.delay       db ; How many calls remain until the next SFX "step".
+.speed       db ; How many no-op calls to insert between SFX "steps".
+.pointer     dw ; Where the next SFX byte should be read from.
+.step_header db ; The current "step"'s header byte.
+.shadow_nr24 db ; Keeps the lower 3 bits of NR24, to avoid resetting them when restarting the channel.
+.sgb         db ; Set to $FF (although VALFX_HDR_SGB_B is sufficient) to enable SGB support, 0 otherwise.
 .end
 
 SECTION "VAL-FX Code",ROM0
@@ -146,10 +145,9 @@ valfx_play:
 
     ; Prevent SFX playback while we are modifying memory (race condition).
     xor a
-    ld [valfx_ram.is_play], a
+    ld [valfx_ram.is_playing], a
 
     ld a, [hl+]
-    ld [valfx_ram.header], a
     ld c, a
     ld a, [valfx_ram.sgb]
     and c
@@ -166,11 +164,11 @@ valfx_play:
 .notsgbdata
 
     ; Load data from header
-    ; Increase pointer by one and store to valfx_ram.point
+    ; Increase pointer by one and store to valfx_ram.pointer
     ld a, h
-    ld [valfx_ram.point], a
+    ld [valfx_ram.pointer], a
     ld a, l
-    ld [valfx_ram.point+1], a
+    ld [valfx_ram.pointer+1], a
 
     ; Reset mute channels
 
@@ -192,30 +190,30 @@ valfx_play:
     ldh [rNR44], a
 .skipch4
 
-    ld hl, valfx_ram.laslen
+    ld hl, valfx_ram.speed
     xor a
     ld [hld], a
-    assert valfx_ram.laslen - 1 == valfx_ram.curlen
+    assert valfx_ram.speed - 1 == valfx_ram.delay
     ld [hld], a
-    assert valfx_ram.curlen - 1 == valfx_ram.is_play
+    assert valfx_ram.delay - 1 == valfx_ram.is_playing
     ld [hl], 1
     ret
 
 valfx_update:
-    ld a, [valfx_ram.is_play]
+    ld a, [valfx_ram.is_playing]
     and a
     ret z
 
-    ld a, [valfx_ram.curlen]
+    ld a, [valfx_ram.delay]
     and a
     jr z, .iszero
     dec a
-    ld [valfx_ram.curlen], a
+    ld [valfx_ram.delay], a
     ret
 .iszero
 
-    ld a, [valfx_ram.laslen]
-    ld [valfx_ram.curlen], a
+    ld a, [valfx_ram.speed]
+    ld [valfx_ram.delay], a
 
     call .get_next_value
     ld [valfx_ram.step_header], a
@@ -242,16 +240,16 @@ valfx_update:
 ; Returns next value in A
 ; Modifies: H, L, A, F
 .get_next_value
-    ld hl, valfx_ram.point
+    ld hl, valfx_ram.pointer
     ld a, [hli]
     ld h, [hl]
     ld l, a
     ld a, [hl+]
     push af
     ld a, h
-    ld [valfx_ram.point], a
+    ld [valfx_ram.pointer], a
     ld a, l
-    ld [valfx_ram.point+1], a
+    ld [valfx_ram.pointer+1], a
     pop af
     ret
 
@@ -273,8 +271,8 @@ ENDM
 
 .set_speed
     call .get_next_value
-    ld [valfx_ram.laslen], a
-    ld [valfx_ram.curlen], a
+    ld [valfx_ram.speed], a
+    ld [valfx_ram.delay], a
     jp .return
 
 .set_pan
@@ -322,7 +320,7 @@ ENDM
 
 .kill
     xor a
-    ld [valfx_ram.is_play], a
+    ld [valfx_ram.is_playing], a
     ld a, $FF
     ldh [rNR51], a
     ; Unmute music channels
