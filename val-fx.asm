@@ -30,7 +30,7 @@ DEF VALFX_STEP_LAST_B    equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
-.is_playing  db ; 0 disables SFX playback.
+.header      db ; The current SFX's header. If 0, no SFX is currently playing.
 .delay       db ; How many calls remain until the next SFX "step".
 .speed       db ; How many no-op calls to insert between SFX "steps".
 .pointer     dw ; Where the next SFX byte should be read from.
@@ -137,7 +137,7 @@ valfx_play:
     ld a, [hl]
     and VALFX_HDR_PRIO_F
     ld c, a
-    ld a, [valfx_ram.step_header]
+    ld a, [valfx_ram.header]
     and VALFX_HDR_PRIO_F
     cp c
     ret c ; Bail if cur - new < 0, i.e. cur < new
@@ -145,7 +145,7 @@ valfx_play:
 
     ; Prevent SFX playback while we are modifying memory (race condition).
     xor a
-    ld [valfx_ram.is_playing], a
+    ld [valfx_ram.header], a
 
     ld a, [hl+]
     ld c, a
@@ -195,12 +195,13 @@ valfx_play:
     ld [hld], a
     assert valfx_ram.speed - 1 == valfx_ram.delay
     ld [hld], a
-    assert valfx_ram.delay - 1 == valfx_ram.is_playing
-    ld [hl], 1
+    assert valfx_ram.delay - 1 == valfx_ram.header
+    ; Finally, enable SFX playback by writing the header.
+    ld [hl], c
     ret
 
 valfx_update:
-    ld a, [valfx_ram.is_playing]
+    ld a, [valfx_ram.header]
     and a
     ret z
 
