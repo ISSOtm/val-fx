@@ -34,8 +34,8 @@ DEF VALFX_STEP_CH4VOL_B  equ 7
 SECTION "VAL-FX RAM Variables",WRAM0
 valfx_ram:
 .header      db ; The current SFX's header. If 0, no SFX is currently playing.
-.delay       db ; How many calls remain until the next SFX "step".
 .speed       db ; How many no-op calls to insert between SFX "steps".
+.delay       db ; How many calls remain until the next SFX "step".
 .pointer     dw ; Where the next SFX byte should be read from.
 .shadow_nr24 db ; Keeps the lower 3 bits of NR24, to avoid resetting them when restarting the channel.
 .sgb         db ; Set to $FF (although VALFX_HDR_SGB_B is sufficient) to enable SGB support, 0 otherwise.
@@ -188,12 +188,12 @@ valfx_play:
     ldh [rNR42], a
 .skipch4
 
-    ld hl, valfx_ram.speed
+    ld hl, valfx_ram.delay
     xor a
     ld [hld], a
-    assert valfx_ram.speed - 1 == valfx_ram.delay
+    assert valfx_ram.delay - 1 == valfx_ram.speed
     ld [hld], a
-    assert valfx_ram.delay - 1 == valfx_ram.header
+    assert valfx_ram.speed - 1 == valfx_ram.header
     ; Finally, enable SFX playback by writing the header.
     ld [hl], c
     ret
@@ -211,10 +211,18 @@ valfx_update:
     ret
 .iszero
 
-    ld a, [valfx_ram.speed]
-    ld [valfx_ram.delay], a
+    ld hl, valfx_ram.speed
+    ld a, [hli]
+    assert valfx_ram.speed + 1 == valfx_ram.delay
+    ld [hli], a
 
-    call .get_next_value
+    assert valfx_ram.delay + 1 == valfx_ram.pointer
+    ld a, [hli]
+    ld h, [hl]
+    ld l, a
+
+    ; Read the step's header byte.
+    ld a, [hli]
     ld c, a
     ld de, .jumpTable - 2
 .fxLoop
@@ -224,6 +232,11 @@ valfx_update:
     sla c
     jr c, .runFX ; We may loop one extra time after the last
     jr nz, .fxLoop ; Keep looping if there are remaining bits.
+
+    ld a, l
+    ld [valfx_ram.pointer], a
+    ld a, h
+    ld [valfx_ram.pointer + 1], a
     ret
 
 .runFX
@@ -275,23 +288,24 @@ ENDM
     jr .fxLoop
 
 .set_speed
-    call .get_next_value
+    ld a, [hli]
     ld [valfx_ram.speed], a
     ld [valfx_ram.delay], a
     jr .fxLoop
 
 .set_pan
-    call .get_next_value
+    ld a, [hli]
     ldh [rNR51], a
     jr .fxLoop
 
 .set_ch2_duty
-    call .get_next_value
+    ld a, [hli]
     ldh [rNR21], a
     jr .fxLoop
 
 .set_ch2_note
-    call .get_next_value
+    ld a, [hli]
+    push hl
     ld hl, valfx_note_table
     ld d, 0
     ld e, a
@@ -301,15 +315,16 @@ ENDM
     ld a, [hl]
     ld [valfx_ram.shadow_nr24], a
     ldh [rNR24], a
+    pop hl
     jr .fxLoop
 
 .set_ch4_freq
-    call .get_next_value
+    ld a, [hli]
     ldh [rNR43], a
     jr .fxLoop
 
 .set_ch2_vol
-    call .get_next_value
+    ld a, [hli]
     ldh [rNR22], a
     ld a, [valfx_ram.shadow_nr24]
     set 7, a ; Trigger bit
@@ -317,24 +332,8 @@ ENDM
     jr .fxLoop
 
 .set_ch4_vol
-    call .get_next_value
+    ld a, [hli]
     ldh [rNR42], a
     ld a, $80 ; Trigger bit
     ldh [rNR44], a
-    jp .fxLoop
-
-; Returns next value in A
-; Modifies: H, L, A, F
-.get_next_value
-    ld hl, valfx_ram.pointer
-    ld a, [hli]
-    ld h, [hl]
-    ld l, a
-    ld a, [hl+]
-    push af
-    ld a, h
-    ld [valfx_ram.pointer], a
-    ld a, l
-    ld [valfx_ram.pointer+1], a
-    pop af
-    ret
+    jr .fxLoop
