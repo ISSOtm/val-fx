@@ -179,8 +179,6 @@ valfx_play:
     ; Mute ch2
     xor a
     ldh [rNR22], a
-    set 7, a
-    ldh [rNR24], a
 .skipch2
 
     bit VALFX_HDR_CH4_B, c
@@ -188,8 +186,6 @@ valfx_play:
     ; Mute ch4
     xor a
     ldh [rNR42], a
-    ld a, AUDHIGH_LENGTH_ON
-    ldh [rNR44], a
 .skipch4
 
     ld hl, valfx_ram.speed
