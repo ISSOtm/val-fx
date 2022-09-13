@@ -44,8 +44,10 @@ valfx_ram:
 SECTION "VAL-FX Code",ROM0
 
 valfx_identifier:
-    ; "VAL-FX BY CVB 2022"
-    db 86, 65, 76, 45, 70, 88, 32, 66, 89, 32, 67, 86, 66, 32, 50, 48, 50, 50
+    pushc
+    newcharmap valfx_ascii ; Ensure ASCII
+    db "VAL-FX BY CVB 2022"
+    popc
 valfx_note_table:
     dw 44
     dw 156
