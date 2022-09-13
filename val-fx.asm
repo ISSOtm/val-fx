@@ -32,14 +32,14 @@ DEF VALFX_STEP_CH2VOL_B  equ 6
 DEF VALFX_STEP_CH4VOL_B  equ 7
 
 SECTION "VAL-FX RAM Variables",WRAM0
-valfx_ram:
+_valfx_is_playing:: ; Must be set to 0 before first call to `valfx_play` or `valfx_update`.
+valfx:
 .header      db ; The current SFX's header. If 0, no SFX is currently playing.
 .speed       db ; How many no-op calls to insert between SFX "steps".
 .delay       db ; How many calls remain until the next SFX "step".
 .pointer     dw ; Where the next SFX byte should be read from.
 .shadow_nr24 db ; Keeps the lower 3 bits of NR24, to avoid resetting them when restarting the channel.
 .sgb         db ; Set to $FF (although VALFX_HDR_SGB_B is sufficient) to enable SGB support, 0 otherwise.
-.end
 
 SECTION "VAL-FX Code",ROM0
 
@@ -122,16 +122,6 @@ valfx_note_table:
     dw 2013
     dw 2015
 
-valfx_init:
-    ld hl, valfx_ram
-    ld c, (valfx_ram.end - valfx_ram)
-    xor a
-.clear
-    ld [hli], a
-    dec c
-    jr nz, .clear
-    ret
-
 
 ; Parameters:
 ; HL: Address for SFX start
@@ -141,7 +131,7 @@ valfx_play:
     ld a, [hl]
     and VALFX_HDR_PRIO_F
     ld c, a
-    ld a, [valfx_ram.header]
+    ld a, [valfx.header]
     and VALFX_HDR_PRIO_F
     cp c
     ret c ; Bail if cur - new < 0, i.e. cur < new
@@ -149,11 +139,11 @@ valfx_play:
 
     ; Prevent SFX playback while we are modifying memory (race condition).
     xor a
-    ld [valfx_ram.header], a
+    ld [valfx.header], a
 
     ld a, [hl+]
     ld c, a
-    ld a, [valfx_ram.sgb]
+    ld a, [valfx.sgb]
     and c
     jr z, .notsgb
     ; Do SGB Stuff IDK
@@ -168,11 +158,11 @@ valfx_play:
 .notsgbdata
 
     ; Load data from header
-    ; Increase pointer by one and store to valfx_ram.pointer
+    ; Increase pointer by one and store to valfx.pointer
     ld a, h
-    ld [valfx_ram.pointer], a
+    ld [valfx.pointer], a
     ld a, l
-    ld [valfx_ram.pointer+1], a
+    ld [valfx.pointer+1], a
 
     ; Reset mute channels
 
@@ -190,35 +180,35 @@ valfx_play:
     ldh [rNR42], a
 .skipch4
 
-    ld hl, valfx_ram.delay
+    ld hl, valfx.delay
     xor a
     ld [hld], a
-    assert valfx_ram.delay - 1 == valfx_ram.speed
+    assert valfx.delay - 1 == valfx.speed
     ld [hld], a
-    assert valfx_ram.speed - 1 == valfx_ram.header
+    assert valfx.speed - 1 == valfx.header
     ; Finally, enable SFX playback by writing the header.
     ld [hl], c
     ret
 
 valfx_update:
-    ld a, [valfx_ram.header]
+    ld a, [valfx.header]
     and a
     ret z
 
-    ld a, [valfx_ram.delay]
+    ld a, [valfx.delay]
     and a
     jr z, .iszero
     dec a
-    ld [valfx_ram.delay], a
+    ld [valfx.delay], a
     ret
 .iszero
 
-    ld hl, valfx_ram.speed
+    ld hl, valfx.speed
     ld a, [hli]
-    assert valfx_ram.speed + 1 == valfx_ram.delay
+    assert valfx.speed + 1 == valfx.delay
     ld [hli], a
 
-    assert valfx_ram.delay + 1 == valfx_ram.pointer
+    assert valfx.delay + 1 == valfx.pointer
     ld a, [hli]
     ld h, [hl]
     ld l, a
@@ -236,9 +226,9 @@ valfx_update:
     jr nz, .fxLoop ; Keep looping if there are remaining bits.
 
     ld a, l
-    ld [valfx_ram.pointer], a
+    ld [valfx.pointer], a
     ld a, h
-    ld [valfx_ram.pointer + 1], a
+    ld [valfx.pointer + 1], a
     ret
 
 .runFX
@@ -265,15 +255,18 @@ ENDM
     valfx_fx VALFX_STEP_PAN_B,     .set_pan
     valfx_fx VALFX_STEP_LAST_B,    .stop
 
+    ; These FX functions can read bytes from the SFX data from hl (and modify it appropriately),
+    ; but MUST preserve c (which contains the step header being iterated on).
+
 .stop
     ld a, $FF ; TODO: maybe we're a bit overreaching here
     ldh [rNR51], a
 
-    ld a, [valfx_ram.header]
+    ld a, [valfx.header]
     ld b, a
     ; Disable playback.
     xor a
-    ld [valfx_ram.header], a
+    ld [valfx.header], a
     ; Unmute the music channels that we use.
     bit 5, b
     jr nz, .skipch2
@@ -291,8 +284,8 @@ ENDM
 
 .set_speed
     ld a, [hli]
-    ld [valfx_ram.speed], a
-    ld [valfx_ram.delay], a
+    ld [valfx.speed], a
+    ld [valfx.delay], a
     jr .fxLoop
 
 .set_pan
@@ -316,7 +309,7 @@ ENDM
     ldh [rNR23], a
     inc de
     ld a, [de]
-    ld [valfx_ram.shadow_nr24], a
+    ld [valfx.shadow_nr24], a
     ldh [rNR24], a
     jr .fxLoop
 
@@ -328,7 +321,7 @@ ENDM
 .set_ch2_vol
     ld a, [hli]
     ldh [rNR22], a
-    ld a, [valfx_ram.shadow_nr24]
+    ld a, [valfx.shadow_nr24]
     set 7, a ; Trigger bit
     ldh [rNR24], a
     jr .fxLoop
