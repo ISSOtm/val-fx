@@ -305,17 +305,17 @@ ENDM
 
 .set_ch2_note
     ld a, [hli]
-    push hl
-    ld hl, valfx_note_table
-    ld d, 0
+    add a, LOW(valfx_note_table)
     ld e, a
-    add hl, de
-    ld a, [hl+]
+    adc a, HIGH(valfx_note_table)
+    sub e
+    ld d, a
+    ld a, [de]
     ldh [rNR23], a
-    ld a, [hl]
+    inc de
+    ld a, [de]
     ld [valfx_ram.shadow_nr24], a
     ldh [rNR24], a
-    pop hl
     jr .fxLoop
 
 .set_ch4_freq
